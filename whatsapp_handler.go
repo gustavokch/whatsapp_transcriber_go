@@ -12,11 +12,13 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"log/slog"
 
 	"github.com/joho/godotenv"
-	"github.com/tulir/whatsmeow"
-	"github.com/tulir/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
+	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 var (
@@ -65,8 +67,15 @@ func main() {
 	log.Printf("Loaded excluded numbers: %v", EXCLUDED_NUMBERS)
 
 	// Initialize WhatsMeow client with sqlite storage (adjust DSN as needed)
-	dbLog := log.New(os.Stdout, "DB: ", log.LstdFlags)
-	container, err := sqlstore.New("sqlite3", "file:db.sqlite3?_foreign_keys=on", dbLog)
+	// dbLog := log.New(os.Stdout, "DB: ", log.LstdFlags)
+	// waLog := log.New(os.Stdout, "WhatsApp: ", log.LstdFlags)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+    logger.Info("Whatsmeow message: ")
+    logger.Debug("DB message: ")
+    logger.Warn("Warning message")
+    logger.Error("Error message")
+	// waLog.Logger=logger.Info
+	container, err := sqlstore.New("sqlite3", "file:db.sqlite3?_foreign_keys=on", waLog)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
@@ -74,7 +83,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get device: %v", err)
 	}
-	client := whatsmeow.NewClient(deviceStore)
+	client := whatsmeow.NewClient(deviceStore, logger.Info)
 
 	// Register event handler for incoming messages
 	client.AddEventHandler(func(evt interface{}) {
@@ -103,7 +112,7 @@ func main() {
 // handleMessage inspects incoming messages and routes audio messages for transcription.
 func handleMessage(client *whatsmeow.Client, evt *events.Message) {
 	// Skip group messages
-	if evt.Info.Chat.IsGroup {
+	if evt.Info.Chat.is.group {
 		log.Println("Message is from a group, ignoring...")
 		return
 	}
