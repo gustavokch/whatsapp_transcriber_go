@@ -20,6 +20,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
+    log = waLog.Logger
 
 var (
 	EXCLUDED_NUMBERS map[string]bool
@@ -75,7 +76,7 @@ func main() {
     logger.Warn("Warning message")
     logger.Error("Error message")
 	// waLog.Logger=logger.Info
-	container, err := sqlstore.New("sqlite3", "file:db.sqlite3?_foreign_keys=on", waLog)
+	container, err := sqlstore.New("sqlite3", "file:db.sqlite3?_foreign_keys=on", waLog.Logger)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
@@ -83,7 +84,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get device: %v", err)
 	}
-	client := whatsmeow.NewClient(deviceStore, logger.Info)
+	client := whatsmeow.NewClient(deviceStore, waLog.Logger)
 
 	// Register event handler for incoming messages
 	client.AddEventHandler(func(evt interface{}) {
