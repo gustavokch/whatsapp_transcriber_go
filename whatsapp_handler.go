@@ -12,15 +12,13 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"log/slog"
-
 	"github.com/joho/godotenv"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
-    log = waLog.Logger
+
 
 var (
 	EXCLUDED_NUMBERS map[string]bool
@@ -63,7 +61,7 @@ func main() {
 	}
 
 	setupDirectories()
-
+    log = waLog.Logger
 	EXCLUDED_NUMBERS = loadExcludedNumbers("exclude.txt")
 	log.Printf("Loaded excluded numbers: %v", EXCLUDED_NUMBERS)
 
@@ -76,7 +74,7 @@ func main() {
     logger.Warn("Warning message")
     logger.Error("Error message")
 	// waLog.Logger=logger.Info
-	container, err := sqlstore.New("sqlite3", "file:db.sqlite3?_foreign_keys=on", waLog.Logger)
+	container, err := sqlstore.New("sqlite3", "file:db.sqlite3?_foreign_keys=on", log)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
