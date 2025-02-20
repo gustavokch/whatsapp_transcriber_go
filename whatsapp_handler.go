@@ -1,24 +1,24 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
+
 	"github.com/joho/godotenv"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
+	// Example - for core WhatsApp types
+	// Example - for media related types
+	// Example - for connection/call related types)
 )
-
 
 var (
 	EXCLUDED_NUMBERS map[string]bool
@@ -59,22 +59,19 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, continuing with environment variables")
 	}
+	dbLog := waLog.Stdout("Database", "DEBUG", true)
+	clientLog := waLog.Stdout("Client", "DEBUG", true)
 
 	setupDirectories()
-    log = waLog.Logger
+
 	EXCLUDED_NUMBERS = loadExcludedNumbers("exclude.txt")
 	log.Printf("Loaded excluded numbers: %v", EXCLUDED_NUMBERS)
 
 	// Initialize WhatsMeow client with sqlite storage (adjust DSN as needed)
 	// dbLog := log.New(os.Stdout, "DB: ", log.LstdFlags)
 	// waLog := log.New(os.Stdout, "WhatsApp: ", log.LstdFlags)
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-    logger.Info("Whatsmeow message: ")
-    logger.Debug("DB message: ")
-    logger.Warn("Warning message")
-    logger.Error("Error message")
 	// waLog.Logger=logger.Info
-	container, err := sqlstore.New("sqlite3", "file:db.sqlite3?_foreign_keys=on", log)
+	container, err := sqlstore.New("sqlite3", "file:db.sqlite3?_foreign_keys=on", dbLog)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
@@ -82,7 +79,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get device: %v", err)
 	}
-	client := whatsmeow.NewClient(deviceStore, waLog.Logger)
+	client := whatsmeow.NewClient(deviceStore, clientLog)
 
 	// Register event handler for incoming messages
 	client.AddEventHandler(func(evt interface{}) {
@@ -110,8 +107,32 @@ func main() {
 
 // handleMessage inspects incoming messages and routes audio messages for transcription.
 func handleMessage(client *whatsmeow.Client, evt *events.Message) {
+	if evt.Info.MediaType == "audio" && evt.Message.AudioMessage != nil {
+		// Get the media key and direct path
+		audioMsg := evt.Message.AudioMessage
+		mediaKey := audioMsg.GetMediaKey()
+		directPath := audioMsg.GetDirectPath()
+
+		// Define the file path where the audio will be saved
+		savePath := filepath.Join("downloads", fmt.Sprintf("%s.ogg", evt.Info.ID))
+
+		// Ensure the directory exists
+		if err := os.MkdirAll(filepath.Dir(savePath), 0755); err != nil {
+			fmt.Println("Error creating directory:", err)
+			return
+		}
+
+		// Save the file
+		err = os.WriteFile(savePath, data, 0644)
+		if err != nil {
+			fmt.Println("Error saving audio file:", err)
+			return
+		}
+
+		fmt.Println("Audio message saved to:", savePath)
+	}
 	// Skip group messages
-	if evt.Info.Chat.is.group {
+	if evt.Info.IsGroup {
 		log.Println("Message is from a group, ignoring...")
 		return
 	}
@@ -137,25 +158,17 @@ func handleMessage(client *whatsmeow.Client, evt *events.Message) {
 
 // processAudioMessage downloads the audio, calls the transcription API, and sends a reply.
 func processAudioMessage(client *whatsmeow.Client, evt *events.Message) error {
-	audioMsg := evt.Message.GetAudioMessage()
+	audioMsg := client.DownloadToFile(evt.Message.GetAudioMessage(), File)
 	if audioMsg == nil {
 		return fmt.Errorf("audio message details not found")
 	}
 
 	// Example: assume audioMsg.URL contains the download link and audioMsg.FileLength is available.
-	directPath := audioMsg.URL
-	fileLength := audioMsg.FileLength
 
 	// Download audio file (here using a simple HTTP GET; in production, use WhatsMeow’s media download if available)
-	resp, err := http.Get(directPath)
-	if err != nil {
-		log.Printf("Failed to download audio: %v", err)
-		return err
-	}
-	defer resp.Body.Close()
 
-	// Create a temporary file in MESSAGES_DIR
-	tempFile, err := os.CreateTemp(MESSAGES_DIR, fmt.Sprintf("audio-%d-*.webm", fileLength))
+	//	Create a temporary file in MESSAGES_DIR
+	tempFile, err := os.CreateTemp(MESSAGES_DIR, fmt.Sprintf("audio-%d-*.webm"))
 	if err != nil {
 		log.Printf("Failed to create temp file: %v", err)
 		return err
@@ -163,14 +176,14 @@ func processAudioMessage(client *whatsmeow.Client, evt *events.Message) error {
 	defer tempFile.Close()
 	tempFilePath := tempFile.Name()
 
-	if _, err := io.Copy(tempFile, resp.Body); err != nil {
+	if _, err := io.Copy(tempFile, audioMsg); err != nil {
 		log.Printf("Failed to save audio file: %v", err)
 		return err
 	}
-	log.Printf("Audio message downloaded and saved to: %s", tempFilePath)
+	log.Printf("Audio message downloaded and saved to: %s", audioMsg)
 
 	// Transcribe the audio using Groq (alternatively, you could call CfTranscribe)
-	transcription, err := TranscribeAudioGroq(tempFilePath, WHISPER_PROMPT, "pt")
+	transcription, err := TranscribeAudioGroq(audioMsg, WHISPER_PROMPT, "pt")
 	if err != nil {
 		log.Printf("Error during transcription: %v", err)
 		// Optionally, send a reply with an error message here.
@@ -179,11 +192,11 @@ func processAudioMessage(client *whatsmeow.Client, evt *events.Message) error {
 	log.Println("Audio transcription completed.")
 
 	// Remove the temporary audio file
-	if err := os.Remove(tempFilePath); err != nil {
-		log.Printf("Error removing temporary audio file: %v", err)
-	} else {
-		log.Printf("Temporary audio file removed: %s", tempFilePath)
-	}
+	// if err := os.Remove(tempFilePath); err != nil {
+	// 	log.Printf("Error removing temporary audio file: %v", err)
+	// } else {
+	// 	log.Printf("Temporary audio file removed: %s", tempFilePath)
+	// }
 
 	// Prepare and send the reply (adjust based on WhatsMeow’s sending API)
 	transcription = strings.TrimSpace(transcription)
